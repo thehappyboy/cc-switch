@@ -28,6 +28,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+// HTTPS (WebView 客户端必需)
+use axum_server::tls_rustls::RustlsConfig;
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
@@ -57,6 +60,10 @@ pub struct ProxyServer {
     shutdown_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
     /// 服务器任务句柄，用于等待服务器实际关闭
     server_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
+    /// HTTPS 服务器 axum Handle（用于 graceful shutdown）
+    https_axum_handle: Arc<RwLock<Option<axum_server::Handle>>>,
+    /// HTTPS 服务器任务句柄
+    https_join_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
 }
 
 impl ProxyServer {
@@ -88,6 +95,8 @@ impl ProxyServer {
             state,
             shutdown_tx: Arc::new(RwLock::new(None)),
             server_handle: Arc::new(RwLock::new(None)),
+            https_axum_handle: Arc::new(RwLock::new(None)),
+            https_join_handle: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -134,6 +143,9 @@ impl ProxyServer {
 
         // 记录启动时间
         *self.state.start_time.write().await = Some(std::time::Instant::now());
+
+        // HTTPS 需要一份 Router clone（HTTP spawn 会 move 走 app）
+        let app_for_https = app.clone();
 
         // 启动服务器 — 使用手动 hyper HTTP/1.1 accept loop
         // 开启 preserve_header_case 以捕获客户端请求头的原始大小写
@@ -215,6 +227,63 @@ impl ProxyServer {
         // 保存服务器任务句柄
         *self.server_handle.write().await = Some(handle);
 
+        // 如果配置了 HTTPS + 证书/密钥存在，启动 HTTPS 监听器（WebView 客户端必需）
+        if let (Some(port), Some(cert_path), Some(key_path)) = (
+            self.config.https_port,
+            self.config.tls_cert_path.clone(),
+            self.config.tls_key_path.clone(),
+        ) {
+            match format!("{}:{}", self.config.listen_address, port).parse::<SocketAddr>() {
+                Ok(https_addr) => {
+                    match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
+                        Ok(rustls_config) => {
+                            let axum_handle = axum_server::Handle::new();
+                            let axum_handle_clone = axum_handle.clone();
+                            let app_clone = app_for_https.clone();
+                            let log_addr = https_addr;
+                            let log_port = port;
+
+                            let join_handle = tokio::spawn(async move {
+                                log::info!(
+                                    "[{}] HTTPS 代理启动于 {log_addr}",
+                                    log_srv::STARTED
+                                );
+                                if let Err(e) = axum_server::bind_rustls(log_addr, rustls_config)
+                                    .handle(axum_handle_clone)
+                                    .serve(app_clone.into_make_service())
+                                    .await
+                                {
+                                    log::error!(
+                                        "[{}] HTTPS 服务器错误: {e}",
+                                        log_srv::TASK_ERROR
+                                    );
+                                }
+                            });
+
+                            *self.https_axum_handle.write().await = Some(axum_handle);
+                            *self.https_join_handle.write().await = Some(join_handle);
+                            log::info!(
+                                "[{}] HTTPS 已启用（端口 {log_port}），WebView 客户端可连接",
+                                log_srv::STARTED
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "[{}] HTTPS 启动失败（证书/密钥加载失败: {e}），仅 HTTP 可用",
+                                log_srv::STARTED
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[{}] HTTPS 地址无效（{e}），跳过 HTTPS",
+                        log_srv::STARTED
+                    );
+                }
+            }
+        }
+
         Ok(ProxyServerInfo {
             address: self.config.listen_address.clone(),
             port: actual_port,
@@ -251,7 +320,27 @@ impl ProxyServer {
             }
         } else {
             Ok(())
+        }?;
+
+        // 停止 HTTPS 服务器（如果启用）
+        if let Some(handle) = self.https_axum_handle.write().await.take() {
+            handle.graceful_shutdown(Some(std::time::Duration::from_secs(5)));
         }
+        if let Some(handle) = self.https_join_handle.write().await.take() {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+                Ok(Ok(())) => {
+                    log::info!("[{}] HTTPS 服务器已完全停止", log_srv::STOPPED);
+                }
+                Ok(Err(e)) => {
+                    log::warn!("[{}] HTTPS 任务异常终止: {e}", log_srv::TASK_ERROR);
+                }
+                Err(_) => {
+                    log::warn!("[{}] HTTPS 停止超时（5秒）", log_srv::STOP_TIMEOUT);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn get_status(&self) -> ProxyStatus {
@@ -354,6 +443,15 @@ impl ProxyServer {
             .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
+            // CORS: 回显 Origin（WebView 客户端 credentialed fetch 必需）+ 凭据 + 全方法全头
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::mirror_request())
+                    .allow_credentials(true)
+                    .allow_methods(tower_http::cors::Any)
+                    .allow_headers(tower_http::cors::Any)
+                    .expose_headers(tower_http::cors::Any),
+            )
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
             .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
             .with_state(self.state.clone())

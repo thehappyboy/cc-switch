@@ -425,6 +425,9 @@ impl Database {
                         streaming_first_byte_timeout: row.get::<_, i32>(4).unwrap_or(60) as u64,
                         streaming_idle_timeout: row.get::<_, i32>(5).unwrap_or(120) as u64,
                         non_streaming_timeout: row.get::<_, i32>(6).unwrap_or(600) as u64,
+                        https_port: None,          // TODO: 持久化到 DB
+                        tls_cert_path: None,       // TODO: 持久化到 DB
+                        tls_key_path: None,        // TODO: 持久化到 DB
                     })
                 },
             )

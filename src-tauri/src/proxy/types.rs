@@ -25,6 +25,16 @@ pub struct ProxyConfig {
     /// 非流式总超时（秒）- 非流式请求的总超时时间，范围 60-1200 秒，默认 600 秒（10 分钟）
     #[serde(default = "default_non_streaming_timeout")]
     pub non_streaming_timeout: u64,
+    /// HTTPS 监听端口（None 或 0 = 不启用 HTTPS）
+    /// WebView 客户端（如 Claude for Office add-in）因 mixed content 限制需要 HTTPS。
+    #[serde(default)]
+    pub https_port: Option<u16>,
+    /// TLS 证书路径（PEM 格式，mkcert 生成）
+    #[serde(default)]
+    pub tls_cert_path: Option<String>,
+    /// TLS 私钥路径（PEM 格式）
+    #[serde(default)]
+    pub tls_key_path: Option<String>,
 }
 
 fn default_streaming_first_byte_timeout() -> u64 {
@@ -51,6 +61,9 @@ impl Default for ProxyConfig {
             streaming_first_byte_timeout: 60,
             streaming_idle_timeout: 120,
             non_streaming_timeout: 600,
+            https_port: None,
+            tls_cert_path: None,
+            tls_key_path: None,
         }
     }
 }
