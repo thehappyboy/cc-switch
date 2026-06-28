@@ -443,11 +443,12 @@ impl ProxyServer {
             .route("/gemini/v1beta/*path", any(handlers::handle_gemini))
             // Gemini 的 GA 版本也叫 /v1，给原 SDK 留一条出口
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
-            // CORS: 回显 Origin（WebView 客户端 credentialed fetch 必需）+ 凭据 + 全方法全头
+            // CORS: 回显 Origin + 全方法全头（WebView 客户端必需）
+            // 注意：allow_headers(Any) 不能与 allow_credentials(true) 共存（CORS 规范）
+            // Office add-in 用 Authorization header 传 token，不需要 credentials
             .layer(
                 CorsLayer::new()
                     .allow_origin(AllowOrigin::mirror_request())
-                    .allow_credentials(true)
                     .allow_methods(tower_http::cors::Any)
                     .allow_headers(tower_http::cors::Any)
                     .expose_headers(tower_http::cors::Any),

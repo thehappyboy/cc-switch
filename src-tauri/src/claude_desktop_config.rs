@@ -999,7 +999,22 @@ fn apply_provider_to_paths_inner(
 
     write_deployment_mode(&paths.normal_config_path, "3p")?;
     write_deployment_mode(&paths.threep_config_path, "3p")?;
-    write_json_file(&paths.profile_path, &profile)?;
+    // 写 profile 时保留用户加的字段（如 managedMcpServers、preferences 等），
+    // 只覆盖 provider 特定字段（inferenceGateway*、inferenceModels 等）。
+    // 这样切 provider 时用户加的 MCP 配置不会丢。
+    let mut existing_profile = if paths.profile_path.exists() {
+        read_json_or_empty(&paths.profile_path)?
+    } else {
+        json!({})
+    };
+    if let (Some(existing_obj), Some(new_obj)) =
+        (existing_profile.as_object_mut(), profile.as_object())
+    {
+        for (k, v) in new_obj {
+            existing_obj.insert(k.clone(), v.clone());
+        }
+    }
+    write_json_file(&paths.profile_path, &existing_profile)?;
     write_meta(&paths.meta_path, Some(PROFILE_ID))?;
 
     Ok(())
