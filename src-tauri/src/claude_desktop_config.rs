@@ -291,45 +291,75 @@ pub fn get_or_create_gateway_token(db: &Database) -> Result<String, AppError> {
 pub fn direct_gateway_credentials(
     provider: &Provider,
 ) -> Result<DirectGatewayCredentials, AppError> {
-    let env = provider
+    // 兼容两种格式：
+    //   旧格式: settings_config.env.ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN
+    //   新格式: settings_config.inferenceGatewayBaseUrl / inferenceGatewayApiKey
+    let (base_url, api_key) = if let Some(env) = provider
         .settings_config
         .get("env")
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            AppError::localized(
-                "claude_desktop.provider.env_missing",
-                "Claude Desktop 直连供应商缺少 env 配置",
-                "Claude Desktop direct provider is missing env configuration",
-            )
-        })?;
-
-    let base_url = env
-        .get("ANTHROPIC_BASE_URL")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            AppError::localized(
-                "claude_desktop.provider.base_url_missing",
-                "Claude Desktop 直连供应商缺少 ANTHROPIC_BASE_URL",
-                "Claude Desktop direct provider is missing ANTHROPIC_BASE_URL",
-            )
-        })?
-        .to_string();
-
-    let api_key = env
-        .get("ANTHROPIC_AUTH_TOKEN")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            AppError::localized(
-                "claude_desktop.provider.auth_token_missing",
-                "Claude Desktop 直连供应商缺少 ANTHROPIC_AUTH_TOKEN（Bearer Token）",
-                "Claude Desktop direct provider is missing ANTHROPIC_AUTH_TOKEN (Bearer Token)",
-            )
-        })?
-        .to_string();
+    {
+        // 旧 env 格式
+        let base_url = env
+            .get("ANTHROPIC_BASE_URL")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "claude_desktop.provider.base_url_missing",
+                    "Claude Desktop 直连供应商缺少 ANTHROPIC_BASE_URL",
+                    "Claude Desktop direct provider is missing ANTHROPIC_BASE_URL",
+                )
+            })?
+            .to_string();
+        let api_key = env
+            .get("ANTHROPIC_AUTH_TOKEN")
+            .or_else(|| env.get("ANTHROPIC_API_KEY"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "claude_desktop.provider.auth_token_missing",
+                    "Claude Desktop 直连供应商缺少 ANTHROPIC_AUTH_TOKEN（Bearer Token）",
+                    "Claude Desktop direct provider is missing ANTHROPIC_AUTH_TOKEN (Bearer Token)",
+                )
+            })?
+            .to_string();
+        (base_url, api_key)
+    } else {
+        // 新 profile 格式
+        let base_url = provider
+            .settings_config
+            .get("inferenceGatewayBaseUrl")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "claude_desktop.provider.base_url_missing",
+                    "Claude Desktop 直连供应商缺少 Base URL",
+                    "Claude Desktop direct provider is missing Base URL",
+                )
+            })?
+            .to_string();
+        let api_key = provider
+            .settings_config
+            .get("inferenceGatewayApiKey")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                AppError::localized(
+                    "claude_desktop.provider.api_key_missing",
+                    "Claude Desktop 直连供应商缺少 API Key",
+                    "Claude Desktop direct provider is missing API Key",
+                )
+            })?
+            .to_string();
+        (base_url, api_key)
+    };
 
     Ok(DirectGatewayCredentials { base_url, api_key })
 }
