@@ -508,6 +508,31 @@ export function ClaudeDesktopProviderForm({
     setRoutes(normalizeProxyRows(defaultProxyRouteRows));
   }, [defaultProxyRouteRows, mode, routes.length]);
 
+  // 实时同步模型路由到 settingsConfig，让"配置JSON"显示完整配置
+  useEffect(() => {
+    const currentConfig = form.getValues("settingsConfig");
+    try {
+      const parsed = JSON.parse(currentConfig);
+      const routeMap: Record<string, ClaudeDesktopModelRoute> = {};
+      for (const route of routes) {
+        const r = route.route.trim();
+        const m = route.model.trim();
+        if (r || m) {
+          routeMap[r] = {
+            model: mode === "direct" ? r : m || r,
+            labelOverride: route.labelOverride.trim() || (mode === "proxy" ? m : undefined),
+            supports1m: route.supports1m || undefined,
+          };
+        }
+      }
+      parsed.claudeDesktopModelRoutes = routeMap;
+      parsed.claudeDesktopMode = mode;
+      form.setValue("settingsConfig", JSON.stringify(parsed, null, 2));
+    } catch {
+      // settingsConfig 不是有效 JSON，跳过
+    }
+  }, [routes, mode, form]);
+
   const handleFetchModels = async () => {
     if (!baseUrl.trim() || !apiKey.trim()) {
       showFetchModelsError(null, t, {
@@ -663,6 +688,9 @@ export function ClaudeDesktopProviderForm({
       };
       return acc;
     }, {});
+
+    // 把模型路由也写入 settingsConfig，这样"配置JSON"里能看到完整配置
+    settingsConfig.claudeDesktopModelRoutes = routeMap;
 
     const meta: ProviderMeta = {
       ...(initialData?.meta ?? {}),
