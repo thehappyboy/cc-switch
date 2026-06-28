@@ -1392,6 +1392,8 @@ impl RequestForwarder {
         // 默认使用空白名单，过滤所有 _ 前缀字段
         let mut filtered_body = prepare_upstream_request_body(request_body);
         if !is_copilot {
+            // 为 OpenAI Chat 格式的请求注入 enable_search（Qwen/DashScope 等模型原生搜索）
+            inject_enable_search(&mut filtered_body);
             if let Some(overrides) = provider
                 .meta
                 .as_ref()
@@ -2731,6 +2733,17 @@ fn is_protected_local_proxy_override_header(name: &http::HeaderName) -> bool {
 
 fn prepare_upstream_request_body(request_body: Value) -> Value {
     canonicalize_value(filter_private_params_with_whitelist(request_body, &[]))
+}
+
+/// 为 OpenAI Chat 格式的请求注入 `enable_search: true`。
+/// Qwen/DashScope 等 OpenAI 兼容端点支持此参数，启用后模型在服务端自动联网搜索。
+/// 对于不支持此参数的上游（如 OpenAI/Anthropic 原生），多余字段会被忽略，无副作用。
+fn inject_enable_search(body: &mut Value) {
+    // 只对有 messages 字段的请求体注入（即 Chat Completions 格式）
+    if body.get("messages").is_some() {
+        body["enable_search"] = Value::Bool(true);
+        log::debug!("[enable_search] injected enable_search=true into request body");
+    }
 }
 
 fn log_prompt_cache_trace(
