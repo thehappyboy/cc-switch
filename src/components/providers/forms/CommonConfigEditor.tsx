@@ -19,6 +19,8 @@ interface CommonConfigEditorProps {
   onModalClose: () => void;
   onExtract?: () => void;
   isExtracting?: boolean;
+  /** App type: "claude", "claude_desktop", etc. When not "claude", hides Claude Code-specific toggles. */
+  appType?: string;
 }
 
 export function CommonConfigEditor({
@@ -34,9 +36,11 @@ export function CommonConfigEditor({
   onModalClose,
   onExtract,
   isExtracting,
+  appType = "claude",
 }: CommonConfigEditorProps) {
   const { t } = useTranslation();
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const isClaudeCode = appType === "claude";
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains("dark"));
@@ -194,68 +198,82 @@ export function CommonConfigEditor({
             {commonConfigError}
           </p>
         )}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={toggleStates.hideAttribution}
-              onChange={(e) =>
-                handleToggle("hideAttribution", e.target.checked)
-              }
-              className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
-            />
-            <span>{t("claudeConfig.hideAttribution")}</span>
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={toggleStates.teammates}
-              onChange={(e) => handleToggle("teammates", e.target.checked)}
-              className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
-            />
-            <span>{t("claudeConfig.enableTeammates")}</span>
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={toggleStates.enableToolSearch}
-              onChange={(e) =>
-                handleToggle("enableToolSearch", e.target.checked)
-              }
-              className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
-            />
-            <span>{t("claudeConfig.enableToolSearch")}</span>
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={toggleStates.effortMax}
-              onChange={(e) => handleToggle("effortMax", e.target.checked)}
-              className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
-            />
-            <span>{t("claudeConfig.effortMax")}</span>
-          </label>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <input
-              type="checkbox"
-              checked={toggleStates.disableAutoUpgrade}
-              onChange={(e) =>
-                handleToggle("disableAutoUpgrade", e.target.checked)
-              }
-              className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
-            />
-            <span>{t("claudeConfig.disableAutoUpgrade")}</span>
-          </label>
-        </div>
+        {isClaudeCode && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toggleStates.hideAttribution}
+                onChange={(e) =>
+                  handleToggle("hideAttribution", e.target.checked)
+                }
+                className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
+              />
+              <span>{t("claudeConfig.hideAttribution")}</span>
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toggleStates.teammates}
+                onChange={(e) => handleToggle("teammates", e.target.checked)}
+                className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
+              />
+              <span>{t("claudeConfig.enableTeammates")}</span>
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toggleStates.enableToolSearch}
+                onChange={(e) =>
+                  handleToggle("enableToolSearch", e.target.checked)
+                }
+                className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
+              />
+              <span>{t("claudeConfig.enableToolSearch")}</span>
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toggleStates.effortMax}
+                onChange={(e) => handleToggle("effortMax", e.target.checked)}
+                className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
+              />
+              <span>{t("claudeConfig.effortMax")}</span>
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toggleStates.disableAutoUpgrade}
+                onChange={(e) =>
+                  handleToggle("disableAutoUpgrade", e.target.checked)
+                }
+                className="w-4 h-4 text-blue-500 bg-white dark:bg-gray-800 border-border-default rounded focus:ring-blue-500 dark:focus:ring-blue-400 focus:ring-2"
+              />
+              <span>{t("claudeConfig.disableAutoUpgrade")}</span>
+            </label>
+          </div>
+        )}
         <JsonEditor
           value={localValue}
           onChange={handleLocalChange}
-          placeholder={`{
+          placeholder={
+            isClaudeCode
+              ? `{
   "env": {
     "ANTHROPIC_BASE_URL": "https://your-api-endpoint.com",
     "ANTHROPIC_AUTH_TOKEN": "your-api-key-here"
   }
-}`}
+}`
+              : `{
+  "managedMcpServers": [
+    {
+      "name": "context7",
+      "url": "https://mcp.context7.com/mcp",
+      "transport": "http"
+    }
+  ]
+}`
+          }
           darkMode={isDarkMode}
           rows={14}
           showValidation={true}

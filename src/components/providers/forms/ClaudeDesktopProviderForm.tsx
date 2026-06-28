@@ -1188,19 +1188,8 @@ export function ClaudeDesktopProviderForm({
               onModalClose={() => setIsCommonConfigModalOpen(false)}
               onExtract={handleExtract}
               isExtracting={isExtracting}
+              appType="claude_desktop"
             />
-
-            <div className="space-y-2">
-              <Label>{t("provider.configJson", { defaultValue: "配置 JSON" })}</Label>
-              <JsonEditor
-                value={form.watch("settingsConfig")}
-                onChange={(config) => form.setValue("settingsConfig", config)}
-                rows={14}
-                showValidation={true}
-                language="json"
-                darkMode={document.documentElement.classList.contains("dark")}
-              />
-            </div>
 
             <FormField
               control={form.control}
