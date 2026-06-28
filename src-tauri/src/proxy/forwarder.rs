@@ -2735,15 +2735,49 @@ fn prepare_upstream_request_body(request_body: Value) -> Value {
     canonicalize_value(filter_private_params_with_whitelist(request_body, &[]))
 }
 
-/// 为 OpenAI Chat 格式的请求注入 `enable_search: true`。
+/// 为 OpenAI Chat 格式的请求注入 `enable_search: true`，并剥掉 `web_search` 工具定义。
 /// Qwen/DashScope 等 OpenAI 兼容端点支持此参数，启用后模型在服务端自动联网搜索。
+/// 同时剥掉 Anthropic 内置的 `web_search` server tool（转成 function tool 后模型会报
+/// "No implementation for web_search"），因为模型用 `enable_search` 参数搜索，不是工具调用。
 /// 对于不支持此参数的上游（如 OpenAI/Anthropic 原生），多余字段会被忽略，无副作用。
 fn inject_enable_search(body: &mut Value) {
-    // 只对有 messages 字段的请求体注入（即 Chat Completions 格式）
-    if body.get("messages").is_some() {
-        body["enable_search"] = Value::Bool(true);
-        log::debug!("[enable_search] injected enable_search=true into request body");
+    if body.get("messages").is_none() {
+        return;
     }
+    // 注入 enable_search
+    body["enable_search"] = Value::Bool(true);
+
+    // 剥掉 web_search 工具定义（OpenAI Chat 格式里是 tools[].function.name == "web_search"）
+    if let Some(tools) = body.get_mut("tools").and_then(|t| t.as_array_mut()) {
+        let before = tools.len();
+        tools.retain(|tool| {
+            // OpenAI function tool: {"type":"function","function":{"name":"web_search",...}}
+            let name = tool
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            // 也匹配 Anthropic 原始格式: {"type":"web_search",...} 或 {"name":"web_search",...}
+            let tool_type = tool.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let direct_name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            name != "web_search" && tool_type != "web_search" && direct_name != "web_search"
+        });
+        if tools.len() < before {
+            log::debug!(
+                "[enable_search] stripped {} web_search tool(s) from tools array",
+                before - tools.len()
+            );
+        }
+    }
+
+    // 如果 tools 变空了，删掉整个字段（有些上游对空 tools 数组报错）
+    if body.get("tools").and_then(|t| t.as_array()).is_some_and(|t| t.is_empty()) {
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("tools");
+        }
+    }
+
+    log::debug!("[enable_search] injected enable_search=true, stripped web_search tools");
 }
 
 fn log_prompt_cache_trace(
