@@ -327,18 +327,54 @@ export function ClaudeDesktopProviderForm({
   );
 
   const defaultValues: ProviderFormData = useMemo(
-    () => ({
-      name: initialData?.name ?? "",
-      websiteUrl: initialData?.websiteUrl ?? "",
-      notes: initialData?.notes ?? "",
-      settingsConfig: JSON.stringify(
-        initialData?.settingsConfig ?? { env: {} },
-        null,
-        2,
-      ),
-      icon: initialData?.icon ?? "",
-      iconColor: initialData?.iconColor ?? "",
-    }),
+    () => {
+      // 兼容旧的 env 格式 + 新的 profile 格式
+      const raw = clonePlainRecord(initialData?.settingsConfig);
+      if (raw.env) {
+        // 旧格式：从 env 转换到 profile 格式
+        const env = raw.env as Record<string, unknown>;
+        delete raw.env;
+        delete raw.claudeDesktopModelRoutes;
+        delete raw.claudeDesktopMode;
+        raw.inferenceGatewayBaseUrl = env.ANTHROPIC_BASE_URL ?? "";
+        raw.inferenceGatewayApiKey = env.ANTHROPIC_AUTH_TOKEN ?? env.ANTHROPIC_API_KEY ?? "";
+        raw.inferenceGatewayAuthScheme = "bearer";
+        raw.inferenceProvider = "gateway";
+        raw.inferenceCredentialKind = "static";
+        // 从 meta 的 routes 构建 inferenceModels
+        const routes = initialData?.meta?.claudeDesktopModelRoutes;
+        if (routes) {
+          raw.inferenceModels = Object.entries(routes).map(([name, route]) => {
+            const entry: Record<string, unknown> = {
+              name,
+              labelOverride: route.labelOverride ?? route.model,
+            };
+            if (route.supports1m) entry.supports1m = true;
+            return entry;
+          });
+        }
+      }
+      // 如果新格式但缺 inferenceModels，从 meta 补
+      if (!raw.inferenceModels && initialData?.meta?.claudeDesktopModelRoutes) {
+        const routes = initialData.meta.claudeDesktopModelRoutes;
+        raw.inferenceModels = Object.entries(routes).map(([name, route]) => {
+          const entry: Record<string, unknown> = {
+            name,
+            labelOverride: route.labelOverride ?? route.model,
+          };
+          if (route.supports1m) entry.supports1m = true;
+          return entry;
+        });
+      }
+      return {
+        name: initialData?.name ?? "",
+        websiteUrl: initialData?.websiteUrl ?? "",
+        notes: initialData?.notes ?? "",
+        settingsConfig: JSON.stringify(raw, null, 2),
+        icon: initialData?.icon ?? "",
+        iconColor: initialData?.iconColor ?? "",
+      };
+    },
     [initialData],
   );
 
@@ -509,30 +545,36 @@ export function ClaudeDesktopProviderForm({
     setRoutes(normalizeProxyRows(defaultProxyRouteRows));
   }, [defaultProxyRouteRows, mode, routes.length]);
 
-  // 实时同步模型路由到 settingsConfig，让"配置JSON"显示完整配置
+  // 实时同步模型路由到 settingsConfig（profile 格式），让"配置JSON"显示完整配置
   useEffect(() => {
     const currentConfig = form.getValues("settingsConfig");
     try {
       const parsed = JSON.parse(currentConfig);
-      const routeMap: Record<string, ClaudeDesktopModelRoute> = {};
-      for (const route of routes) {
-        const r = route.route.trim();
-        const m = route.model.trim();
-        if (r || m) {
-          routeMap[r] = {
-            model: mode === "direct" ? r : m || r,
-            labelOverride: route.labelOverride.trim() || (mode === "proxy" ? m : undefined),
-            supports1m: route.supports1m || undefined,
+      // 保留 common config 字段（managedMcpServers 等），只更新 provider 字段
+      delete parsed.env;
+      delete parsed.claudeDesktopModelRoutes;
+      delete parsed.claudeDesktopMode;
+      const inferenceModels = routes
+        .filter((r) => r.route.trim() || r.model.trim())
+        .map((route) => {
+          const entry: Record<string, unknown> = {
+            name: route.route.trim(),
+            labelOverride: route.labelOverride.trim() || route.model.trim(),
           };
-        }
-      }
-      parsed.claudeDesktopModelRoutes = routeMap;
-      parsed.claudeDesktopMode = mode;
+          if (route.supports1m) entry.supports1m = true;
+          return entry;
+        });
+      parsed.inferenceGatewayBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+      parsed.inferenceGatewayApiKey = apiKey.trim();
+      parsed.inferenceGatewayAuthScheme = "bearer";
+      parsed.inferenceProvider = "gateway";
+      parsed.inferenceCredentialKind = "static";
+      parsed.inferenceModels = inferenceModels;
       form.setValue("settingsConfig", JSON.stringify(parsed, null, 2));
     } catch {
       // settingsConfig 不是有效 JSON，跳过
     }
-  }, [routes, mode, form]);
+  }, [routes, mode, baseUrl, apiKey, form]);
 
   const handleFetchModels = async () => {
     if (!baseUrl.trim() || !apiKey.trim()) {
@@ -663,21 +705,6 @@ export function ClaudeDesktopProviderForm({
       }
     }
 
-    const settingsConfig = clonePlainRecord(initialData?.settingsConfig);
-    const env = clonePlainRecord(settingsConfig.env);
-    delete env.ANTHROPIC_AUTH_TOKEN;
-    delete env.ANTHROPIC_API_KEY;
-    settingsConfig.env = usesManagedOAuth
-      ? {
-          ...env,
-          ANTHROPIC_BASE_URL: baseUrl.trim().replace(/\/+$/, ""),
-        }
-      : {
-          ...env,
-          ANTHROPIC_BASE_URL: baseUrl.trim().replace(/\/+$/, ""),
-          [apiKeyField]: apiKey.trim(),
-        };
-
     const routeMap = routeEntries.reduce<
       Record<string, ClaudeDesktopModelRoute>
     >((acc, route) => {
@@ -690,8 +717,34 @@ export function ClaudeDesktopProviderForm({
       return acc;
     }, {});
 
-    // 把模型路由也写入 settingsConfig，这样"配置JSON"里能看到完整配置
-    settingsConfig.claudeDesktopModelRoutes = routeMap;
+    // settingsConfig 直接用 Claude Desktop profile 格式（不是 env 中间格式）
+    // 这样"配置JSON"显示的就是最终输出，用户能看到完整的 profile 内容。
+    // 后端 apply_provider 会在此基础上覆盖 inferenceGatewayBaseUrl/ApiKey（proxy 模式）。
+    const inferenceModels = routeEntries.map((route) => {
+      const entry: Record<string, unknown> = {
+        name: route.route,
+        labelOverride: route.labelOverride || route.model,
+      };
+      if (route.supports1m) {
+        entry.supports1m = true;
+      }
+      return entry;
+    });
+
+    // 保留旧的 common config 字段（managedMcpServers 等），只更新 provider 字段
+    const existingConfig = clonePlainRecord(initialData?.settingsConfig);
+    delete existingConfig.env; // 清掉旧的 env 格式
+    delete existingConfig.claudeDesktopModelRoutes; // 清掉旧的 routes 格式
+    delete existingConfig.claudeDesktopMode; // mode 在 meta 里
+    const settingsConfig: Record<string, unknown> = {
+      ...existingConfig,
+      inferenceGatewayBaseUrl: baseUrl.trim().replace(/\/+$/, ""),
+      inferenceGatewayApiKey: usesManagedOAuth ? "" : apiKey.trim(),
+      inferenceGatewayAuthScheme: "bearer",
+      inferenceProvider: "gateway",
+      inferenceCredentialKind: "static",
+      inferenceModels,
+    };
 
     const meta: ProviderMeta = {
       ...(initialData?.meta ?? {}),
