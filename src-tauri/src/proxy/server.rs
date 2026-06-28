@@ -232,7 +232,8 @@ impl ProxyServer {
         // 证书来源（优先级）：
         //   1. ProxyConfig 显式配置（https_port + tls_cert_path + tls_key_path）
         //   2. 自动检测 ~/.cc-switch/cert.pem + key.pem
-        //   3. 都没有 → 跳过 HTTPS（仅 HTTP）
+        //   3. 都没有 → 自动生成自签证书（rcgen）+ 弹系统密码框安装 CA
+        //   4. 生成失败 → 跳过 HTTPS（仅 HTTP）
         let https_port = self.config.https_port.unwrap_or(self.config.listen_port + 1);
         let (cert_path, key_path) = {
             if let (Some(c), Some(k)) = (&self.config.tls_cert_path, &self.config.tls_key_path) {
@@ -244,7 +245,10 @@ impl ProxyServer {
                 if cert.exists() && key.exists() {
                     (cert.to_string_lossy().to_string(), key.to_string_lossy().to_string())
                 } else {
-                    (String::new(), String::new())
+                    match Self::generate_self_signed_certs(&cc_dir) {
+                        Some((c, k)) => (c, k),
+                        None => (String::new(), String::new()),
+                    }
                 }
             } else {
                 (String::new(), String::new())
@@ -368,6 +372,79 @@ impl ProxyServer {
         }
 
         Ok(())
+    }
+
+    /// 自动生成自签 CA + 服务器证书（不需要 mkcert），保存到 cc_dir。
+    /// 用 osascript 弹系统密码框把 CA 装入系统 keychain（用户点 OK 即可信任）。
+    fn generate_self_signed_certs(cc_dir: &std::path::Path) -> Option<(String, String)> {
+        use rcgen::{CertificateParams, KeyPair, IsCa, BasicConstraints, DistinguishedName, DnType};
+
+        let _ = std::fs::create_dir_all(cc_dir);
+        let cert_path = cc_dir.join("cert.pem");
+        let key_path = cc_dir.join("key.pem");
+        let ca_path = cc_dir.join("ca.pem");
+
+        log::info!("[HTTPS] 正在自动生成自签证书（rcgen）...");
+
+        // 1. 生成 CA
+        let ca_key = KeyPair::generate().ok()?;
+        let mut ca_params = CertificateParams::new(vec![]).ok()?;
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.distinguished_name = DistinguishedName::new();
+        ca_params.distinguished_name.push(DnType::OrganizationName, "CC Switch");
+        ca_params.distinguished_name.push(DnType::CommonName, "CC Switch Local CA");
+        let ca_cert = ca_params.self_signed(&ca_key).ok()?;
+
+        // 2. 生成服务器证书（SAN: 127.0.0.1 + localhost）
+        let server_key = KeyPair::generate().ok()?;
+        let mut server_params = CertificateParams::new(vec![
+            "127.0.0.1".to_string(),
+            "localhost".to_string(),
+        ]).ok()?;
+        server_params.distinguished_name = DistinguishedName::new();
+        server_params.distinguished_name.push(DnType::CommonName, "127.0.0.1");
+        let server_cert = server_params.signed_by(&server_key, &ca_cert, &ca_key).ok()?;
+
+        // 3. 保存 PEM 文件
+        std::fs::write(&ca_path, ca_cert.pem()).ok()?;
+        std::fs::write(&cert_path, server_cert.pem()).ok()?;
+        std::fs::write(&key_path, server_key.serialize_pem()).ok()?;
+
+        log::info!("[HTTPS] 自签证书已生成: {}", cc_dir.display());
+
+        // 4. 用 osascript 弹系统密码框，安装 CA 到系统 keychain
+        let ca_str = ca_path.to_string_lossy().to_string();
+        let script = format!(
+            r#"do shell script "security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain '{ca}'" with administrator privileges"#,
+            ca = ca_str
+        );
+        match std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                log::info!("[HTTPS] CA 证书已安装到系统 keychain，HTTPS 可用");
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                log::warn!(
+                    "[HTTPS] CA 安装未完成（用户可能取消了授权）: {}",
+                    stderr.trim()
+                );
+                log::info!(
+                    "[HTTPS] 手动安装: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {}",
+                    ca_str
+                );
+            }
+            Err(e) => {
+                log::warn!("[HTTPS] osascript 执行失败: {e}");
+            }
+        }
+
+        Some((
+            cert_path.to_string_lossy().to_string(),
+            key_path.to_string_lossy().to_string(),
+        ))
     }
 
     pub async fn get_status(&self) -> ProxyStatus {
