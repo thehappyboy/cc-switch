@@ -41,6 +41,7 @@ import { CodexOAuthSection } from "./CodexOAuthSection";
 import { CommonConfigEditor } from "./CommonConfigEditor";
 import { CopilotAuthSection } from "./CopilotAuthSection";
 import { EndpointField } from "./shared/EndpointField";
+import JsonEditor from "@/components/JsonEditor";
 import { ModelDropdown } from "./shared/ModelDropdown";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { providerSchema, type ProviderFormData } from "@/lib/schemas/provider";
@@ -1188,6 +1189,18 @@ export function ClaudeDesktopProviderForm({
               onExtract={handleExtract}
               isExtracting={isExtracting}
             />
+
+            <div className="space-y-2">
+              <Label>{t("provider.configJson", { defaultValue: "配置 JSON" })}</Label>
+              <JsonEditor
+                value={form.watch("settingsConfig")}
+                onChange={(config) => form.setValue("settingsConfig", config)}
+                rows={14}
+                showValidation={true}
+                language="json"
+                darkMode={document.documentElement.classList.contains("dark")}
+              />
+            </div>
 
             <FormField
               control={form.control}
