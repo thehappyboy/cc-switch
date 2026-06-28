@@ -38,6 +38,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexOAuthSection } from "./CodexOAuthSection";
+import { CommonConfigEditor } from "./CommonConfigEditor";
 import { CopilotAuthSection } from "./CopilotAuthSection";
 import { EndpointField } from "./shared/EndpointField";
 import { ModelDropdown } from "./shared/ModelDropdown";
@@ -66,6 +67,7 @@ import {
   type ClaudeDesktopDefaultRoute,
 } from "@/lib/api/providers";
 import { resolveManagedAccountId } from "@/lib/authBinding";
+import { useCommonConfigSnippet } from "./hooks/useCommonConfigSnippet";
 
 export type ClaudeDesktopProviderFormValues = ProviderFormData & {
   presetId?: string;
@@ -348,6 +350,23 @@ export function ClaudeDesktopProviderForm({
   useEffect(() => {
     onSubmittingChange?.(form.formState.isSubmitting || isFetchingModels);
   }, [form.formState.isSubmitting, isFetchingModels, onSubmittingChange]);
+
+  const {
+    useCommonConfig,
+    commonConfigSnippet,
+    commonConfigError,
+    isExtracting,
+    handleCommonConfigToggle,
+    handleCommonConfigSnippetChange,
+    handleExtract,
+  } = useCommonConfigSnippet({
+    settingsConfig: form.watch("settingsConfig"),
+    onConfigChange: (value) => form.setValue("settingsConfig", value),
+    initialData,
+    appType: "claude_desktop",
+  });
+
+  const [isCommonConfigModalOpen, setIsCommonConfigModalOpen] = useState(false);
 
   const presetEntries = useMemo<PresetEntry[]>(
     () =>
@@ -1126,6 +1145,21 @@ export function ClaudeDesktopProviderForm({
                 </CollapsibleContent>
               </Collapsible>
             )}
+
+            <CommonConfigEditor
+              value={form.watch("settingsConfig")}
+              onChange={(value) => form.setValue("settingsConfig", value)}
+              useCommonConfig={useCommonConfig}
+              onCommonConfigToggle={handleCommonConfigToggle}
+              commonConfigSnippet={commonConfigSnippet}
+              onCommonConfigSnippetChange={handleCommonConfigSnippetChange}
+              commonConfigError={commonConfigError}
+              onEditClick={() => setIsCommonConfigModalOpen(true)}
+              isModalOpen={isCommonConfigModalOpen}
+              onModalClose={() => setIsCommonConfigModalOpen(false)}
+              onExtract={handleExtract}
+              isExtracting={isExtracting}
+            />
 
             <FormField
               control={form.control}

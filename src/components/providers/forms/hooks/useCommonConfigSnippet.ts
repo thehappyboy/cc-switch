@@ -22,6 +22,8 @@ interface UseCommonConfigSnippetProps {
   selectedPresetId?: string;
   /** When false, the hook skips all logic and returns disabled state. Default: true */
   enabled?: boolean;
+  /** App type for API calls: "claude", "claude_desktop", "codex", "gemini". Default: "claude" */
+  appType?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export function useCommonConfigSnippet({
   initialEnabled,
   selectedPresetId,
   enabled = true,
+  appType = "claude",
 }: UseCommonConfigSnippetProps) {
   const { t } = useTranslation();
   const [useCommonConfig, setUseCommonConfig] = useState(false);
@@ -70,7 +73,7 @@ export function useCommonConfigSnippet({
     const loadSnippet = async () => {
       try {
         // 使用统一 API 加载
-        const snippet = await configApi.getCommonConfigSnippet("claude");
+        const snippet = await configApi.getCommonConfigSnippet(appType);
 
         if (snippet && snippet.trim()) {
           if (mounted) {
@@ -84,7 +87,7 @@ export function useCommonConfigSnippet({
                 window.localStorage.getItem(LEGACY_STORAGE_KEY);
               if (legacySnippet && legacySnippet.trim()) {
                 // 迁移到 config.json
-                await configApi.setCommonConfigSnippet("claude", legacySnippet);
+                await configApi.setCommonConfigSnippet(appType, legacySnippet);
                 if (mounted) {
                   setCommonConfigSnippetState(legacySnippet);
                 }
@@ -237,7 +240,7 @@ export function useCommonConfigSnippet({
         setCommonConfigError("");
         // 保存到 config.json（清空）
         configApi
-          .setCommonConfigSnippet("claude", "")
+          .setCommonConfigSnippet(appType, "")
           .catch((error: unknown) => {
             console.error("保存通用配置失败:", error);
             setCommonConfigError(
@@ -265,7 +268,7 @@ export function useCommonConfigSnippet({
         setCommonConfigError("");
         // 保存到 config.json
         configApi
-          .setCommonConfigSnippet("claude", value)
+          .setCommonConfigSnippet(appType, value)
           .catch((error: unknown) => {
             console.error("保存通用配置失败:", error);
             setCommonConfigError(
@@ -327,7 +330,7 @@ export function useCommonConfigSnippet({
     setCommonConfigError("");
 
     try {
-      const extracted = await configApi.extractCommonConfigSnippet("claude", {
+      const extracted = await configApi.extractCommonConfigSnippet(appType, {
         settingsConfig,
       });
 
@@ -347,7 +350,7 @@ export function useCommonConfigSnippet({
       setCommonConfigSnippetState(extracted);
 
       // 保存到后端
-      await configApi.setCommonConfigSnippet("claude", extracted);
+      await configApi.setCommonConfigSnippet(appType, extracted);
     } catch (error) {
       console.error("提取通用配置失败:", error);
       setCommonConfigError(
