@@ -253,19 +253,29 @@ fn validate_claude_desktop_gateway_auth(
 ) -> Result<(), ProxyError> {
     let expected = crate::claude_desktop_config::get_or_create_gateway_token(state.db.as_ref())
         .map_err(|e| ProxyError::AuthError(e.to_string()))?;
-    let Some(value) = headers.get(axum::http::header::AUTHORIZATION) else {
+
+    // 优先检查 Authorization: Bearer <token>
+    let token = if let Some(value) = headers.get(axum::http::header::AUTHORIZATION) {
+        let value = value
+            .to_str()
+            .map_err(|_| ProxyError::AuthError("Authorization 头格式无效".to_string()))?;
+        value
+            .strip_prefix("Bearer ")
+            .or_else(|| value.strip_prefix("bearer "))
+            .unwrap_or("")
+            .trim()
+    } else if let Some(value) = headers.get("x-api-key") {
+        // 也接受 x-api-key（Office add-in 默认用这个头）
+        value
+            .to_str()
+            .unwrap_or("")
+            .trim()
+    } else {
         return Err(ProxyError::AuthError(
-            "Claude Desktop gateway 缺少 Authorization 头".to_string(),
+            "Claude Desktop gateway 缺少 Authorization 或 x-api-key 头".to_string(),
         ));
     };
-    let value = value
-        .to_str()
-        .map_err(|_| ProxyError::AuthError("Authorization 头格式无效".to_string()))?;
-    let token = value
-        .strip_prefix("Bearer ")
-        .or_else(|| value.strip_prefix("bearer "))
-        .unwrap_or("")
-        .trim();
+
     if token != expected {
         return Err(ProxyError::AuthError(
             "Claude Desktop gateway token 无效".to_string(),
