@@ -428,6 +428,8 @@ impl Database {
                         https_port: None,          // TODO: 持久化到 DB
                         tls_cert_path: None,       // TODO: 持久化到 DB
                         tls_key_path: None,        // TODO: 持久化到 DB
+                        web_search_provider: None, // TODO: 持久化到 DB
+                        web_search_api_key: None,  // TODO: 持久化到 DB
                     })
                 },
             )

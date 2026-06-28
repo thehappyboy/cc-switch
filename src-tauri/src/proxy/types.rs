@@ -35,6 +35,12 @@ pub struct ProxyConfig {
     /// TLS 私钥路径（PEM 格式）
     #[serde(default)]
     pub tls_key_path: Option<String>,
+    /// Web search provider: "exa" or "tavily" (for built-in web_search tool execution)
+    #[serde(default)]
+    pub web_search_provider: Option<String>,
+    /// Web search API key (for the configured provider)
+    #[serde(default)]
+    pub web_search_api_key: Option<String>,
 }
 
 fn default_streaming_first_byte_timeout() -> u64 {
@@ -64,6 +70,8 @@ impl Default for ProxyConfig {
             https_port: None,
             tls_cert_path: None,
             tls_key_path: None,
+            web_search_provider: None,
+            web_search_api_key: None,
         }
     }
 }
