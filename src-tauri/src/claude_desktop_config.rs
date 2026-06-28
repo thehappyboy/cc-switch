@@ -999,22 +999,24 @@ fn apply_provider_to_paths_inner(
 
     write_deployment_mode(&paths.normal_config_path, "3p")?;
     write_deployment_mode(&paths.threep_config_path, "3p")?;
-    // 写 profile 时保留用户加的字段（如 managedMcpServers、preferences 等），
-    // 只覆盖 provider 特定字段（inferenceGateway*、inferenceModels 等）。
-    // 这样切 provider 时用户加的 MCP 配置不会丢。
-    let mut existing_profile = if paths.profile_path.exists() {
-        read_json_or_empty(&paths.profile_path)?
-    } else {
-        json!({})
-    };
-    if let (Some(existing_obj), Some(new_obj)) =
-        (existing_profile.as_object_mut(), profile.as_object())
-    {
-        for (k, v) in new_obj {
-            existing_obj.insert(k.clone(), v.clone());
+    // 应用 common config（managedMcpServers 等）到 profile，这样切 provider 时不会丢。
+    // common config 存在 DB 里（config_snippets 表），像 Claude Code 那样合成。
+    let mut final_profile = profile;
+    if let Ok(Some(snippet)) = db.get_config_snippet("claude_desktop") {
+        if !snippet.trim().is_empty() {
+            if let Ok(common_config) = serde_json::from_str::<serde_json::Value>(&snippet) {
+                // Deep merge: common config fields override provider fields if conflict
+                if let (Some(profile_obj), Some(common_obj)) =
+                    (final_profile.as_object_mut(), common_config.as_object())
+                {
+                    for (k, v) in common_obj {
+                        profile_obj.insert(k.clone(), v.clone());
+                    }
+                }
+            }
         }
     }
-    write_json_file(&paths.profile_path, &existing_profile)?;
+    write_json_file(&paths.profile_path, &final_profile)?;
     write_meta(&paths.meta_path, Some(PROFILE_ID))?;
 
     Ok(())
