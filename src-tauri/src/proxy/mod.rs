@@ -35,7 +35,6 @@ pub mod thinking_optimizer;
 pub mod thinking_rectifier;
 pub(crate) mod types;
 pub mod usage;
-pub mod web_search;
 
 // 公开导出给外部使用（commands, services等模块需要）
 #[allow(unused_imports)]

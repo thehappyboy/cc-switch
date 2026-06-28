@@ -227,13 +227,32 @@ impl ProxyServer {
         // 保存服务器任务句柄
         *self.server_handle.write().await = Some(handle);
 
-        // 如果配置了 HTTPS + 证书/密钥存在，启动 HTTPS 监听器（WebView 客户端必需）
-        if let (Some(port), Some(cert_path), Some(key_path)) = (
-            self.config.https_port,
-            self.config.tls_cert_path.clone(),
-            self.config.tls_key_path.clone(),
-        ) {
-            match format!("{}:{}", self.config.listen_address, port).parse::<SocketAddr>() {
+        // HTTPS 自动启动：proxy 开启时同时起 HTTP + HTTPS。
+        // 端口 = HTTP listen_port + 1（如 HTTP 15721 → HTTPS 15722）。
+        // 证书来源（优先级）：
+        //   1. ProxyConfig 显式配置（https_port + tls_cert_path + tls_key_path）
+        //   2. 自动检测 ~/.cc-switch/cert.pem + key.pem
+        //   3. 都没有 → 跳过 HTTPS（仅 HTTP）
+        let https_port = self.config.https_port.unwrap_or(self.config.listen_port + 1);
+        let (cert_path, key_path) = {
+            if let (Some(c), Some(k)) = (&self.config.tls_cert_path, &self.config.tls_key_path) {
+                (c.clone(), k.clone())
+            } else if let Some(home) = dirs::home_dir() {
+                let cc_dir = home.join(".cc-switch");
+                let cert = cc_dir.join("cert.pem");
+                let key = cc_dir.join("key.pem");
+                if cert.exists() && key.exists() {
+                    (cert.to_string_lossy().to_string(), key.to_string_lossy().to_string())
+                } else {
+                    (String::new(), String::new())
+                }
+            } else {
+                (String::new(), String::new())
+            }
+        };
+
+        if !cert_path.is_empty() && !key_path.is_empty() {
+            match format!("{}:{}", self.config.listen_address, https_port).parse::<SocketAddr>() {
                 Ok(https_addr) => {
                     match RustlsConfig::from_pem_file(&cert_path, &key_path).await {
                         Ok(rustls_config) => {
@@ -241,7 +260,7 @@ impl ProxyServer {
                             let axum_handle_clone = axum_handle.clone();
                             let app_clone = app_for_https.clone();
                             let log_addr = https_addr;
-                            let log_port = port;
+                            let log_port = https_port;
 
                             let join_handle = tokio::spawn(async move {
                                 log::info!(
@@ -263,25 +282,33 @@ impl ProxyServer {
                             *self.https_axum_handle.write().await = Some(axum_handle);
                             *self.https_join_handle.write().await = Some(join_handle);
                             log::info!(
-                                "[{}] HTTPS 已启用（端口 {log_port}），WebView 客户端可连接",
-                                log_srv::STARTED
+                                "[{}] HTTPS 已自动启用（端口 {log_port}，HTTP {http_port} + HTTPS {log_port} 同时运行）",
+                                log_srv::STARTED,
+                                http_port = self.config.listen_port
                             );
                         }
                         Err(e) => {
                             log::warn!(
-                                "[{}] HTTPS 启动失败（证书/密钥加载失败: {e}），仅 HTTP 可用",
-                                log_srv::STARTED
+                                "[{}] HTTPS 启动失败（证书加载失败: {e}），仅 HTTP（端口 {http_port}）",
+                                log_srv::STARTED,
+                                http_port = self.config.listen_port
                             );
                         }
                     }
                 }
                 Err(e) => {
                     log::warn!(
-                        "[{}] HTTPS 地址无效（{e}），跳过 HTTPS",
+                        "[{}] HTTPS 地址无效（{e}），跳过",
                         log_srv::STARTED
                     );
                 }
             }
+        } else {
+            log::info!(
+                "[{}] HTTPS 未启用（未找到证书，仅 HTTP 端口 {port}）。放 cert.pem + key.pem 到 ~/.cc-switch/ 可自动启用 HTTPS",
+                log_srv::STARTED,
+                port = self.config.listen_port
+            );
         }
 
         Ok(ProxyServerInfo {
